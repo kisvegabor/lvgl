@@ -406,53 +406,44 @@ LV_ATTRIBUTE_FAST_MEM static void fill_normal(const lv_area_t * disp_area, lv_co
 
         /*Only the mask matters*/
         if(opa > LV_OPA_MAX) {
-            if(draw_area_w < 16) {
-                for(y = 0; y < draw_area_h; y++) {
-                    for(x = 0; x < draw_area_w; x++) {
-                        FILL_NORMAL_MASK_PX(color)
-                    }
+            for(y = 0; y < draw_area_h; y++) {
+                for(x = 0; x < draw_area_w && ((lv_uintptr_t)(mask) & 0x3); x++) {
+                    FILL_NORMAL_MASK_PX(color)
                 }
-            }
-            else {
-                for(y = 0; y < draw_area_h; y++) {
-                    for(x = 0; x < draw_area_w && ((lv_uintptr_t)(mask) & 0x3); x++) {
-                        FILL_NORMAL_MASK_PX(color)
-                    }
 
-                    for(; x <= x_end4; x += 4) {
-                        uint32_t mask32 = *((uint32_t *)mask);
-                        if(mask32 == 0xFFFFFFFF) {
-                            if((lv_uintptr_t)disp_buf_first & 0x3) {
-                                *(disp_buf_first + 0) = color;
-                                uint32_t * d = (uint32_t * )(disp_buf_first + 1);
-                                *d = c32;
-                                *(disp_buf_first + 3) = color;
-                            } else {
-                                uint32_t * d = (uint32_t * )disp_buf_first;
-                                *d = c32;
-                                d++;
-                                *d = c32;
-                            }
-                            disp_buf_first+= 4;
-                            mask += 4;
-                        }
-                        else if(mask32) {
-                            FILL_NORMAL_MASK_PX(color)
-                            FILL_NORMAL_MASK_PX(color)
-                            FILL_NORMAL_MASK_PX(color)
-                            FILL_NORMAL_MASK_PX(color)
+                for(; x <= x_end4; x += 4) {
+                    uint32_t mask32 = *((uint32_t *)mask);
+                    if(mask32 == 0xFFFFFFFF) {
+                        if((lv_uintptr_t)disp_buf_first & 0x3) {
+                            *(disp_buf_first + 0) = color;
+                            uint32_t * d = (uint32_t * )(disp_buf_first + 1);
+                            *d = c32;
+                            *(disp_buf_first + 3) = color;
                         } else {
-                            mask += 4;
-                            disp_buf_first += 4;
-
+                            uint32_t * d = (uint32_t * )disp_buf_first;
+                            *d = c32;
+                            d++;
+                            *d = c32;
                         }
+                        disp_buf_first+= 4;
+                        mask += 4;
                     }
-
-                    for(; x < draw_area_w ; x++) {
+                    else if(mask32) {
                         FILL_NORMAL_MASK_PX(color)
+                        FILL_NORMAL_MASK_PX(color)
+                        FILL_NORMAL_MASK_PX(color)
+                        FILL_NORMAL_MASK_PX(color)
+                    } else {
+                        mask += 4;
+                        disp_buf_first += 4;
+
                     }
-                    disp_buf_first += (disp_w-draw_area_w);
                 }
+
+                for(; x < draw_area_w ; x++) {
+                    FILL_NORMAL_MASK_PX(color)
+                }
+                disp_buf_first += (disp_w-draw_area_w);
             }
         }
         /*Handle opa and mask values too*/
