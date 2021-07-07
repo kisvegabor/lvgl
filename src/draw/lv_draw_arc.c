@@ -130,6 +130,36 @@ void lv_draw_arc(lv_coord_t center_x, lv_coord_t center_y, uint16_t radius,  uin
     lv_draw_mask_radius_init(&mask_out_param, &area_out, LV_RADIUS_CIRCLE, false);
     int16_t mask_out_id = lv_draw_mask_add(&mask_out_param, NULL);
 
+      lv_draw_mask_radius_param_t mask_end1_param;
+      lv_draw_mask_radius_param_t mask_end2_param;
+    int16_t mask_end_id1 = -1;
+    int16_t mask_end_id2 = -1;
+    if(dsc->rounded) {
+      lv_area_t round_area;
+      get_rounded_area(start_angle, radius, width, &round_area);
+      round_area.x1 += center_x;
+      round_area.x2 += center_x;
+      round_area.y1 += center_y;
+      round_area.y2 += center_y;
+      lv_area_t clip_area2;
+      if(_lv_area_intersect(&clip_area2, clip_area, &round_area)) {
+          lv_draw_mask_radius_init(&mask_end1_param, &round_area, LV_RADIUS_CIRCLE, false);
+          mask_end1_param.dsc.add = 1;
+          mask_end_id1 = lv_draw_mask_add(&mask_end1_param, NULL);
+      }
+
+      get_rounded_area(end_angle, radius, width, &round_area);
+      round_area.x1 += center_x;
+      round_area.x2 += center_x;
+      round_area.y1 += center_y;
+      round_area.y2 += center_y;
+      if(_lv_area_intersect(&clip_area2, clip_area, &round_area)) {
+          lv_draw_mask_radius_init(&mask_end2_param, &round_area, LV_RADIUS_CIRCLE, false);
+          mask_end2_param.dsc.add = 1;
+          mask_end_id2 = lv_draw_mask_add(&mask_end2_param, NULL);
+      }
+    }
+
     int32_t angle_gap;
     if(end_angle > start_angle) {
         angle_gap = 360 - (end_angle - start_angle);
@@ -163,39 +193,9 @@ void lv_draw_arc(lv_coord_t center_x, lv_coord_t center_y, uint16_t radius,  uin
     lv_draw_mask_remove_id(mask_angle_id);
     lv_draw_mask_remove_id(mask_out_id);
     lv_draw_mask_remove_id(mask_in_id);
+    lv_draw_mask_remove_id(mask_end_id1);
+    lv_draw_mask_remove_id(mask_end_id2);
 
-    if(dsc->rounded) {
-
-        lv_draw_mask_radius_param_t mask_end_param;
-
-        lv_area_t round_area;
-        get_rounded_area(start_angle, radius, width, &round_area);
-        round_area.x1 += center_x;
-        round_area.x2 += center_x;
-        round_area.y1 += center_y;
-        round_area.y2 += center_y;
-        lv_area_t clip_area2;
-        if(_lv_area_intersect(&clip_area2, clip_area, &round_area)) {
-            lv_draw_mask_radius_init(&mask_end_param, &round_area, LV_RADIUS_CIRCLE, false);
-            int16_t mask_end_id = lv_draw_mask_add(&mask_end_param, NULL);
-
-            lv_draw_rect(&area_out, &clip_area2, &cir_dsc);
-            lv_draw_mask_remove_id(mask_end_id);
-        }
-
-        get_rounded_area(end_angle, radius, width, &round_area);
-        round_area.x1 += center_x;
-        round_area.x2 += center_x;
-        round_area.y1 += center_y;
-        round_area.y2 += center_y;
-        if(_lv_area_intersect(&clip_area2, clip_area, &round_area)) {
-            lv_draw_mask_radius_init(&mask_end_param, &round_area, LV_RADIUS_CIRCLE, false);
-            int16_t mask_end_id = lv_draw_mask_add(&mask_end_param, NULL);
-
-            lv_draw_rect(&area_out, &clip_area2, &cir_dsc);
-            lv_draw_mask_remove_id(mask_end_id);
-        }
-    }
 #else
     LV_LOG_WARN("Can't draw arc with LV_DRAW_COMPLEX == 0");
     LV_UNUSED(center_x);
@@ -363,8 +363,8 @@ static void draw_quarter_1(quarter_draw_dsc_t * q)
             quarter_area.x1 = q->center_x - q->radius;
             quarter_area.y1 = q->center_y;
 
-            quarter_area.y2 = q->center_y + ((lv_trigo_sin(q->start_angle) * (q->radius)) >> LV_TRIGO_SHIFT);
-            quarter_area.x2 = q->center_x + ((lv_trigo_sin(q->start_angle + 90) * (q->radius - q->width)) >> LV_TRIGO_SHIFT);
+            quarter_area.y2 = q->center_y + ((lv_trigo_sin(q->start_angle) * (q->radius)) >> LV_TRIGO_SHIFT) + q->width;
+            quarter_area.x2 = q->center_x + ((lv_trigo_sin(q->start_angle + 90) * (q->radius - q->width)) >> LV_TRIGO_SHIFT) + q->width;
 
             bool ok = _lv_area_intersect(&quarter_area, &quarter_area, q->clip_area);
             if(ok) lv_draw_rect(q->draw_area, &quarter_area, q->draw_dsc);

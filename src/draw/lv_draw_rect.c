@@ -228,7 +228,7 @@ LV_ATTRIBUTE_FAST_MEM static void draw_bg(const lv_area_t * coords, const lv_are
                y < coords_bg.y2 - rout - 1) {
                 mask_res = LV_DRAW_MASK_RES_FULL_COVER;
                 if(simple_mode == false) {
-                    lv_memset(mask_buf, opa, draw_area_w);
+                    lv_memset(mask_buf, 0xff, draw_area_w);
                     mask_res = lv_draw_mask_apply(mask_buf, draw_buf->area.x1 + draw_area.x1, draw_buf->area.y1 + h, draw_area_w);
                 }
             }
@@ -240,7 +240,7 @@ LV_ATTRIBUTE_FAST_MEM static void draw_bg(const lv_area_t * coords, const lv_are
 
             /*If mask will taken into account its base opacity was already set by memset above*/
             if(mask_res == LV_DRAW_MASK_RES_CHANGED) {
-                opa2 = LV_OPA_COVER;
+//                opa2 = LV_OPA_COVER;
             }
 
             /*Get the current line color*/
