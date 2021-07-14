@@ -48,11 +48,12 @@ LV_ATTRIBUTE_FAST_MEM static lv_draw_mask_res_t line_mask_steep(lv_opa_t * mask_
                                                                 lv_draw_mask_line_param_t * p);
 
 LV_ATTRIBUTE_FAST_MEM static inline lv_opa_t mask_mix(lv_opa_t mask_act, lv_opa_t mask_new);
-LV_ATTRIBUTE_FAST_MEM static inline lv_opa_t mask_add(lv_opa_t mask_act, lv_opa_t mask_new);
 
 /**********************
  *  STATIC VARIABLES
  **********************/
+#define LV_CIRCLE_CACHE_SIZE    5
+static _lv_draw_mask_radius_circle_dsc_t circle_cache[LV_CIRCLE_CACHE_SIZE];
 
 /**********************
  *      MACROS
@@ -132,10 +133,16 @@ void * lv_draw_mask_remove_id(int16_t id)
     if(id != LV_MASK_ID_INV) {
         p = LV_GC_ROOT(_lv_draw_mask_list[id]).param;
         if(p->type == LV_DRAW_MASK_TYPE_RADIUS) {
-            lv_draw_mask_radius_param_t * rp = LV_GC_ROOT(_lv_draw_mask_list[id]).param;
-            lv_mem_free(rp->circle.cir_opa);
+            lv_draw_mask_radius_param_t * radius_p = (lv_draw_mask_radius_param_t *) p;
+            if(radius_p->circle) {
+                if(radius_p->circle->life < 0) {
+                    lv_mem_free(radius_p->circle->cir_opa);
+                    lv_mem_free(radius_p->circle);
+                } else {
+                    radius_p->circle->used_cnt--;
+                }
+            }
         }
-
         LV_GC_ROOT(_lv_draw_mask_list[id]).param = NULL;
         LV_GC_ROOT(_lv_draw_mask_list[id]).custom_id = NULL;
 
@@ -409,16 +416,6 @@ void lv_circ_next(lv_point_t * c, lv_coord_t * tmp)
 
 static void cir_calc_aa4(_lv_draw_mask_radius_circle_dsc_t * c, lv_coord_t radius)
 {
-
-
-//    const uint8_t a1[]= {0, 176, 64, 128, 64, 176, 0, 0, 0};
-//    const uint8_t a2[]= {5, 4, 4, 3, 1, 0, 0, 0, 0};
-//    const uint8_t a3[]= {0, 1, 2, 3, 4, 5, 6, 0, 0};
-//    c->cir_opa = a1;
-//    c->x_start_on_y = a2;
-//    c->opa_start_on_y = a3;
-//    return;
-
     if(radius == 0) return;
     uint32_t y_8th_cnt = 0;
     lv_point_t cp;
@@ -426,8 +423,11 @@ static void cir_calc_aa4(_lv_draw_mask_radius_circle_dsc_t * c, lv_coord_t radiu
     lv_circ_init(&cp, &tmp, radius * 4);
     int32_t i;
 
+    c->radius = radius;
 
-    c->cir_opa = lv_mem_alloc(radius * 4 + 3);
+    if(c->buf) lv_mem_free(c->buf);
+    c->buf = lv_mem_alloc(radius * 4 + 3);
+    c->cir_opa = c->buf;
     c->opa_start_on_y = c->cir_opa + 2 * radius + 1;
     c->x_start_on_y = c->cir_opa + 3 * radius + 2;
 
@@ -575,9 +575,46 @@ void lv_draw_mask_radius_init(lv_draw_mask_radius_param_t * param, const lv_area
     param->cfg.outer = inv ? 1 : 0;
     param->dsc.cb = (lv_draw_mask_xcb_t)lv_draw_mask_radius;
     param->dsc.type = LV_DRAW_MASK_TYPE_RADIUS;
-    param->dsc.add = false;
 
-    cir_calc_aa4(&param->circle, radius);
+    if(radius == 0) {
+        param->circle = NULL;
+        return;
+    }
+
+    uint32_t i;
+
+    /*Try to reuse a circle cache entry*/
+    for(i = 0; i < LV_CIRCLE_CACHE_SIZE; i++) {
+        if(circle_cache[i].radius == radius) {
+            circle_cache[i].used_cnt++;
+            circle_cache[i].life += radius < 16 ? 1 : radius / 16;
+            param->circle = &circle_cache[i];
+            return;
+        }
+    }
+
+    /*If not found find a free entry with lowest life*/
+    _lv_draw_mask_radius_circle_dsc_t * entry = NULL;
+    for(i = 0; i < LV_CIRCLE_CACHE_SIZE; i++) {
+        if(circle_cache[i].used_cnt == 0) {
+            if(!entry) entry = &circle_cache[i];
+            else if(circle_cache[i].life < entry->life) entry = &circle_cache[i];
+        }
+    }
+
+    if(!entry) {
+        entry = lv_mem_alloc(sizeof(_lv_draw_mask_radius_circle_dsc_t));
+        LV_ASSERT_MALLOC(param->circle);
+        lv_memset_00(entry, sizeof(_lv_draw_mask_radius_circle_dsc_t));
+        entry->life = -1;
+    } else {
+        entry->used_cnt++;
+        entry->life += radius < 16 ? 1 : radius / 16;
+    }
+
+    param->circle = entry;
+
+    cir_calc_aa4(param->circle, radius);
 }
 
 /**
@@ -1088,8 +1125,7 @@ LV_ATTRIBUTE_FAST_MEM static lv_draw_mask_res_t lv_draw_mask_radius(lv_opa_t * m
 
     if(outer == false) {
         if((abs_y < rect.y1 || abs_y > rect.y2)) {
-            if(p->dsc.add) return LV_DRAW_MASK_RES_CHANGED;
-            else return LV_DRAW_MASK_RES_TRANSP;
+            return LV_DRAW_MASK_RES_TRANSP;
         }
     }
     else {
@@ -1098,37 +1134,37 @@ LV_ATTRIBUTE_FAST_MEM static lv_draw_mask_res_t lv_draw_mask_radius(lv_opa_t * m
         }
     }
 
-//    if((abs_x >= rect.x1 + radius && abs_x + len <= rect.x2 - radius) ||
-//       (abs_y >= rect.y1 + radius && abs_y <= rect.y2 - radius)) {
-//        if(outer == false) {
-//            /*Remove the edges*/
-//            int32_t last =  rect.x1 - abs_x;
-//            if(last > len) return LV_DRAW_MASK_RES_TRANSP;
-//            if(last >= 0) {
-//                lv_memset_00(&mask_buf[0], last);
-//            }
-//
-//            int32_t first = rect.x2 - abs_x + 1;
-//            if(first <= 0) return LV_DRAW_MASK_RES_TRANSP;
-//            else if(first < len) {
-//                lv_memset_00(&mask_buf[first], len - first);
-//            }
-//            if(last == 0 && first == len) return LV_DRAW_MASK_RES_FULL_COVER;
-//            else return LV_DRAW_MASK_RES_CHANGED;
-//        }
-//        else {
-//            int32_t first = rect.x1 - abs_x;
-//            if(first < 0) first = 0;
-//            if(first <= len) {
-//                int32_t last =  rect.x2 - abs_x - first + 1;
-//                if(first + last > len) last = len - first;
-//                if(last >= 0) {
-//                    lv_memset_00(&mask_buf[first], last);
-//                }
-//            }
-//        }
-//        return LV_DRAW_MASK_RES_CHANGED;
-//    }
+    if((abs_x >= rect.x1 + radius && abs_x + len <= rect.x2 - radius) ||
+       (abs_y >= rect.y1 + radius && abs_y <= rect.y2 - radius)) {
+        if(outer == false) {
+            /*Remove the edges*/
+            int32_t last =  rect.x1 - abs_x;
+            if(last > len) return LV_DRAW_MASK_RES_TRANSP;
+            if(last >= 0) {
+                lv_memset_00(&mask_buf[0], last);
+            }
+
+            int32_t first = rect.x2 - abs_x + 1;
+            if(first <= 0) return LV_DRAW_MASK_RES_TRANSP;
+            else if(first < len) {
+                lv_memset_00(&mask_buf[first], len - first);
+            }
+            if(last == 0 && first == len) return LV_DRAW_MASK_RES_FULL_COVER;
+            else return LV_DRAW_MASK_RES_CHANGED;
+        }
+        else {
+            int32_t first = rect.x1 - abs_x;
+            if(first < 0) first = 0;
+            if(first <= len) {
+                int32_t last =  rect.x2 - abs_x - first + 1;
+                if(first + last > len) last = len - first;
+                if(last >= 0) {
+                    lv_memset_00(&mask_buf[first], last);
+                }
+            }
+        }
+        return LV_DRAW_MASK_RES_CHANGED;
+    }
 //    printf("exec: x:%d.. %d, y:%d: r:%d, %s\n", abs_x, abs_x + len - 1, abs_y, p->cfg.radius, p->cfg.outer ? "inv" : "norm");
 
 
@@ -1151,7 +1187,7 @@ LV_ATTRIBUTE_FAST_MEM static lv_draw_mask_res_t lv_draw_mask_radius(lv_opa_t * m
     } else {
         cir_y = abs_y - (h - radius);
     }
-    lv_opa_t * aa_opa = get_next_line(&p->circle, cir_y, &aa_len, &x_start);
+    lv_opa_t * aa_opa = get_next_line(p->circle, cir_y, &aa_len, &x_start);
     lv_coord_t cir_x_right = k + w - radius + x_start;
     lv_coord_t cir_x_left = k + radius - x_start - 1;
     lv_coord_t i;
@@ -1160,35 +1196,20 @@ LV_ATTRIBUTE_FAST_MEM static lv_draw_mask_res_t lv_draw_mask_radius(lv_opa_t * m
         for(i = 0; i < aa_len; i++) {
             lv_opa_t opa = aa_opa[aa_len - i - 1];
             if(cir_x_right + i >= 0 && cir_x_right + i < len) {
-                if(!p->dsc.add) {
-                    mask_buf[cir_x_right + i] = mask_mix(opa, mask_buf[cir_x_right + i]);
-                } else {
-                    mask_buf[cir_x_right + i] = mask_add(opa, mask_buf[cir_x_right + i]);
-                }
+                mask_buf[cir_x_right + i] = mask_mix(opa, mask_buf[cir_x_right + i]);
             }
             if(cir_x_left - i >= 0 && cir_x_left - i < len) {
-                if(!p->dsc.add) {
-                    mask_buf[cir_x_left - i] = mask_mix(opa, mask_buf[cir_x_left - i]);
-                } else {
-                    mask_buf[cir_x_left - i] = mask_add(opa, mask_buf[cir_x_left - i]);
-                }
+                mask_buf[cir_x_left - i] = mask_mix(opa, mask_buf[cir_x_left - i]);
             }
         }
 
-        if(!p->dsc.add) {
-            /*Clean the right side*/
-            cir_x_right = LV_CLAMP(0, cir_x_right + i, len);
-            lv_memset_00(&mask_buf[cir_x_right], len - cir_x_right);
+        /*Clean the right side*/
+        cir_x_right = LV_CLAMP(0, cir_x_right + i, len);
+        lv_memset_00(&mask_buf[cir_x_right], len - cir_x_right);
 
-            /*Clean the left side*/
-            cir_x_left = LV_CLAMP(0, cir_x_left - aa_len + 1, len);
-            lv_memset_00(&mask_buf[0], cir_x_left);
-        } else {
-            lv_coord_t clr_start = LV_CLAMP(0, cir_x_left + 1, len);
-            lv_coord_t clr_len = LV_CLAMP(0, cir_x_right - clr_start, len - clr_start);
-            lv_memset_ff(&mask_buf[clr_start], clr_len);
-        }
-
+        /*Clean the left side*/
+        cir_x_left = LV_CLAMP(0, cir_x_left - aa_len + 1, len);
+        lv_memset_00(&mask_buf[0], cir_x_left);
     } else {
         for(i = 0; i < aa_len; i++) {
             lv_opa_t opa = 255 - (aa_opa[aa_len - 1 - i]);
@@ -1294,11 +1315,6 @@ LV_ATTRIBUTE_FAST_MEM static inline lv_opa_t mask_mix(lv_opa_t mask_act, lv_opa_
     if(mask_new <= LV_OPA_MIN) return 0;
 
     return LV_UDIV255(mask_act * mask_new);// >> 8);
-}
-
-LV_ATTRIBUTE_FAST_MEM static inline lv_opa_t mask_add(lv_opa_t mask_act, lv_opa_t mask_new)
-{
-    return LV_MIN((uint16_t)mask_act + mask_new, 255);
 }
 
 

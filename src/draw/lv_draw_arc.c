@@ -144,7 +144,6 @@ void lv_draw_arc(lv_coord_t center_x, lv_coord_t center_y, uint16_t radius,  uin
       lv_area_t clip_area2;
       if(_lv_area_intersect(&clip_area2, clip_area, &round_area)) {
           lv_draw_mask_radius_init(&mask_end1_param, &round_area, LV_RADIUS_CIRCLE, false);
-          mask_end1_param.dsc.add = 1;
           mask_end_id1 = lv_draw_mask_add(&mask_end1_param, NULL);
       }
 
@@ -155,7 +154,6 @@ void lv_draw_arc(lv_coord_t center_x, lv_coord_t center_y, uint16_t radius,  uin
       round_area.y2 += center_y;
       if(_lv_area_intersect(&clip_area2, clip_area, &round_area)) {
           lv_draw_mask_radius_init(&mask_end2_param, &round_area, LV_RADIUS_CIRCLE, false);
-          mask_end2_param.dsc.add = 1;
           mask_end_id2 = lv_draw_mask_add(&mask_end2_param, NULL);
       }
     }

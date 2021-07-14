@@ -92,7 +92,6 @@ typedef uint8_t lv_draw_mask_line_side_t;
 typedef struct {
     lv_draw_mask_xcb_t cb;
     lv_draw_mask_type_t type;
-    bool add;
 } _lv_draw_mask_common_dsc_t;
 
 typedef struct {
@@ -153,6 +152,9 @@ typedef struct  {
     lv_opa_t * cir_opa;
     uint8_t * x_start_on_y;
     uint8_t * opa_start_on_y;
+    int32_t life;
+    uint32_t used_cnt;
+    lv_coord_t radius;
 } _lv_draw_mask_radius_circle_dsc_t;
 
 
@@ -167,7 +169,7 @@ typedef struct {
         uint8_t outer: 1;
     } cfg;
 
-    _lv_draw_mask_radius_circle_dsc_t circle;
+    _lv_draw_mask_radius_circle_dsc_t * circle;
 } lv_draw_mask_radius_param_t;
 
 
