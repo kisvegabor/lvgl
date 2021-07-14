@@ -329,7 +329,7 @@ LV_ATTRIBUTE_FAST_MEM static void draw_bg(const lv_area_t * coords, const lv_are
         if(grad_map) lv_mem_buf_release(grad_map);
         if(mask_buf) lv_mem_buf_release(mask_buf);
         lv_draw_mask_remove_id(mask_rout_id);
-        lv_draw_mask_free_param(&mask_rout_param);
+        if(mask_rout_id != LV_MASK_ID_INV) lv_draw_mask_free_param(&mask_rout_param);
     }
 
 #endif
@@ -513,7 +513,7 @@ LV_ATTRIBUTE_FAST_MEM static void draw_border(const lv_area_t * coords, const lv
         lv_draw_mask_free_param(&mask_rin_param);
         lv_draw_mask_free_param(&mask_rout_param);
         lv_draw_mask_remove_id(mask_rin_id);
-        lv_draw_mask_remove_id(mask_rout_id);
+        if(mask_rout_id != LV_MASK_ID_INV) lv_draw_mask_remove_id(mask_rout_id);
         lv_mem_buf_release(mask_buf);
     }
 #else /*LV_DRAW_COMPLEX*/
