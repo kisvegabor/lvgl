@@ -245,6 +245,15 @@ void * lv_draw_mask_remove_id(int16_t id);
  */
 void * lv_draw_mask_remove_custom(void * custom_id);
 
+/**
+ * Free the data from the parameter.
+ * It's called inside  `lv_draw_mask_remove_id` and `lv_draw_mask_remove_custom`
+ * Needs to be called only in special cases when the mask is not added by `lv_draw_mask_add`
+ * and not removed by `lv_draw_mask_remove_id` or `lv_draw_mask_remove_custom`
+ * @param p pointer to a mask parameter
+ */
+void lv_draw_mask_free_param(void * p);
+
 //! @cond Doxygen_Suppress
 
 /**

@@ -525,6 +525,9 @@ static void draw_ticks_and_labels(lv_obj_t * obj, const lv_area_t * clip_area, c
 
         }
 #if LV_DRAW_COMPLEX
+        lv_draw_mask_free_param(&inner_minor_mask);
+        lv_draw_mask_free_param(&inner_major_mask);
+        lv_draw_mask_free_param(&outer_mask);
         lv_draw_mask_remove_id(outer_mask_id);
 #endif
     }

@@ -513,6 +513,7 @@ static void lv_obj_draw(lv_event_t * e)
 #if LV_DRAW_COMPLEX
         if(lv_obj_get_style_clip_corner(obj, LV_PART_MAIN)) {
             lv_draw_mask_radius_param_t * param = lv_draw_mask_remove_custom(obj + 8);
+            lv_draw_mask_free_param(param);
             lv_mem_buf_release(param);
         }
 #endif

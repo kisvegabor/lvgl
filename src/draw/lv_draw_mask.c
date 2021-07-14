@@ -16,6 +16,8 @@
 /*********************
  *      DEFINES
  *********************/
+#define CIRCLE_CACHE_LIFE_MAX   1000
+#define CIRCLE_CACHE_AGING(life, r)   life = LV_MIN(life + (r < 16 ? 1 : (r >> 4)), 1000)
 
 /**********************
  *      TYPEDEFS
@@ -132,20 +134,8 @@ void * lv_draw_mask_remove_id(int16_t id)
 
     if(id != LV_MASK_ID_INV) {
         p = LV_GC_ROOT(_lv_draw_mask_list[id]).param;
-        if(p->type == LV_DRAW_MASK_TYPE_RADIUS) {
-            lv_draw_mask_radius_param_t * radius_p = (lv_draw_mask_radius_param_t *) p;
-            if(radius_p->circle) {
-                if(radius_p->circle->life < 0) {
-                    lv_mem_free(radius_p->circle->cir_opa);
-                    lv_mem_free(radius_p->circle);
-                } else {
-                    radius_p->circle->used_cnt--;
-                }
-            }
-        }
         LV_GC_ROOT(_lv_draw_mask_list[id]).param = NULL;
         LV_GC_ROOT(_lv_draw_mask_list[id]).custom_id = NULL;
-
     }
 
     return p;
@@ -159,18 +149,38 @@ void * lv_draw_mask_remove_id(int16_t id)
  */
 void * lv_draw_mask_remove_custom(void * custom_id)
 {
-    void * p = NULL;
+    _lv_draw_mask_common_dsc_t * p = NULL;
     uint8_t i;
     for(i = 0; i < _LV_MASK_MAX_NUM; i++) {
         if(LV_GC_ROOT(_lv_draw_mask_list[i]).custom_id == custom_id) {
-            p = LV_GC_ROOT(_lv_draw_mask_list[i]).param;
-            LV_GC_ROOT(_lv_draw_mask_list[i]).param = NULL;
-            LV_GC_ROOT(_lv_draw_mask_list[i]).custom_id = NULL;
+            lv_draw_mask_remove_id(i);
         }
     }
     return p;
 }
 
+/**
+ * Free the data from the parameter.
+ * It's called inside  `lv_draw_mask_remove_id` and `lv_draw_mask_remove_custom`
+ * Needs to be called only in special cases when the mask is not added by `lv_draw_mask_add`
+ * and not removed by `lv_draw_mask_remove_id` or `lv_draw_mask_remove_custom`
+ * @param p pointer to a mask parameter
+ */
+void lv_draw_mask_free_param(void * p)
+{
+    _lv_draw_mask_common_dsc_t * pdsc = p;
+    if(pdsc->type == LV_DRAW_MASK_TYPE_RADIUS) {
+        lv_draw_mask_radius_param_t * radius_p = (lv_draw_mask_radius_param_t *) p;
+        if(radius_p->circle) {
+            if(radius_p->circle->life < 0) {
+                lv_mem_free(radius_p->circle->cir_opa);
+                lv_mem_free(radius_p->circle);
+            } else {
+                radius_p->circle->used_cnt--;
+            }
+        }
+    }
+}
 /**
  * Count the currently added masks
  * @return number of active masks
@@ -431,8 +441,8 @@ static void cir_calc_aa4(_lv_draw_mask_radius_circle_dsc_t * c, lv_coord_t radiu
     c->opa_start_on_y = c->cir_opa + 2 * radius + 1;
     c->x_start_on_y = c->cir_opa + 3 * radius + 2;
 
-    int32_t cir_x[1000];
-    int32_t cir_y[1000];
+    lv_coord_t * cir_x = lv_mem_buf_get((radius + 1) * 2 * 2 * sizeof(lv_coord_t));
+    lv_coord_t * cir_y = &cir_x[(radius + 1) * 2];
 
     uint32_t x_int[4];
     uint32_t x_fract[4];
@@ -545,6 +555,8 @@ static void cir_calc_aa4(_lv_draw_mask_radius_circle_dsc_t * c, lv_coord_t radiu
         }
         y++;
     }
+
+    lv_mem_buf_release(cir_x);
 }
 
 static lv_opa_t * get_next_line(_lv_draw_mask_radius_circle_dsc_t * c, lv_coord_t y, lv_coord_t * len, lv_coord_t * x_start)
@@ -587,7 +599,7 @@ void lv_draw_mask_radius_init(lv_draw_mask_radius_param_t * param, const lv_area
     for(i = 0; i < LV_CIRCLE_CACHE_SIZE; i++) {
         if(circle_cache[i].radius == radius) {
             circle_cache[i].used_cnt++;
-            circle_cache[i].life += radius < 16 ? 1 : radius / 16;
+            CIRCLE_CACHE_AGING(circle_cache[i].life, radius);
             param->circle = &circle_cache[i];
             return;
         }
@@ -609,7 +621,8 @@ void lv_draw_mask_radius_init(lv_draw_mask_radius_param_t * param, const lv_area
         entry->life = -1;
     } else {
         entry->used_cnt++;
-        entry->life += radius < 16 ? 1 : radius / 16;
+        entry->life = 0;
+        CIRCLE_CACHE_AGING(entry->life, radius);
     }
 
     param->circle = entry;
