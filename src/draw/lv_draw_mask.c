@@ -49,13 +49,14 @@ LV_ATTRIBUTE_FAST_MEM static lv_draw_mask_res_t line_mask_steep(lv_opa_t * mask_
                                                                 lv_coord_t len,
                                                                 lv_draw_mask_line_param_t * p);
 
+static void lv_circ_next(lv_point_t * c, lv_coord_t * tmp);
+static void cir_calc_aa4(_lv_draw_mask_radius_circle_dsc_t * c, lv_coord_t radius);
+static lv_opa_t * get_next_line(_lv_draw_mask_radius_circle_dsc_t * c, lv_coord_t y, lv_coord_t * len, lv_coord_t * x_start);
 LV_ATTRIBUTE_FAST_MEM static inline lv_opa_t mask_mix(lv_opa_t mask_act, lv_opa_t mask_new);
 
 /**********************
  *  STATIC VARIABLES
  **********************/
-#define LV_CIRCLE_CACHE_SIZE    5
-static _lv_draw_mask_radius_circle_dsc_t circle_cache[LV_CIRCLE_CACHE_SIZE];
 
 /**********************
  *      MACROS
@@ -181,6 +182,18 @@ void lv_draw_mask_free_param(void * p)
         }
     }
 }
+
+void _lv_draw_mask_cleanup(void)
+{
+    uint8_t i;
+    for(i = 0; i < LV_CIRCLE_CACHE_SIZE; i++) {
+        if(LV_GC_ROOT(_lv_circle_cache[i]).buf) {
+            lv_mem_free(LV_GC_ROOT(_lv_circle_cache[i]).buf);
+        }
+        lv_memset_00(&_lv_circle_cache[i], sizeof(_lv_circle_cache[i]));
+    }
+}
+
 /**
  * Count the currently added masks
  * @return number of active masks
@@ -408,166 +421,6 @@ bool lv_circ_cont(lv_point_t * c)
 }
 
 /**
- * Get the next point from the circle
- * @param c same as in circ_init. The next point stored here.
- * @param tmp same as in circ_init.
- */
-void lv_circ_next(lv_point_t * c, lv_coord_t * tmp)
-{
-
-    if(*tmp <= 0) {
-        (*tmp) += 2 * c->y + 3; /*Change in decision criterion for y -> y+1*/
-    } else {
-        (*tmp) += 2 * (c->y - c->x) + 5; /*Change for y -> y+1, x -> x-1*/
-        c->x--;
-    }
-    c->y++;
-}
-
-static void cir_calc_aa4(_lv_draw_mask_radius_circle_dsc_t * c, lv_coord_t radius)
-{
-    if(radius == 0) return;
-    uint32_t y_8th_cnt = 0;
-    lv_point_t cp;
-    int32_t tmp;
-    lv_circ_init(&cp, &tmp, radius * 4);
-    int32_t i;
-
-    c->radius = radius;
-
-    if(c->buf) lv_mem_free(c->buf);
-    c->buf = lv_mem_alloc(radius * 4 + 3);
-    c->cir_opa = c->buf;
-    c->opa_start_on_y = c->cir_opa + 2 * radius + 1;
-    c->x_start_on_y = c->cir_opa + 3 * radius + 2;
-
-    lv_coord_t * cir_x = lv_mem_buf_get((radius + 1) * 2 * 2 * sizeof(lv_coord_t));
-    lv_coord_t * cir_y = &cir_x[(radius + 1) * 2];
-
-    uint32_t x_int[4];
-    uint32_t x_fract[4];
-    lv_coord_t cir_size = 0;
-    x_int[0] = cp.x >> 2;
-    x_fract[0] = 0;
-    while(lv_circ_cont(&cp)) {
-        for(i = 0; i < 4; i++) {
-            lv_circ_next(&cp, &tmp);
-            if(lv_circ_cont(&cp) == false) break;
-            x_int[i] = cp.x >> 2;
-            x_fract[i] = cp.x & 0x3;
-        }
-        if(i != 4) break;
-
-        /*All lines on the same x when downscaled*/
-        if(x_int[0] == x_int[3]) {
-            cir_x[cir_size] = x_int[0];
-            cir_y[cir_size] = y_8th_cnt;
-            c->cir_opa[cir_size] = x_fract[0] + x_fract[1] + x_fract[2] + x_fract[3];
-            c->cir_opa[cir_size] *= 16;
-            cir_size++;
-        }
-        /*Second line on new x when downscaled*/
-        else if(x_int[0] != x_int[1]) {
-            cir_x[cir_size] = x_int[0];
-            cir_y[cir_size] = y_8th_cnt;
-            c->cir_opa[cir_size] = x_fract[0];
-            c->cir_opa[cir_size] *= 16;
-            cir_size++;
-
-            cir_x[cir_size] = x_int[0] - 1;
-            cir_y[cir_size] = y_8th_cnt;
-            uint32_t tmp = 1 * 4 + x_fract[1] + x_fract[2] + x_fract[3];
-            c->cir_opa[cir_size] = tmp;
-            c->cir_opa[cir_size] *= 16;
-            cir_size++;
-        }
-        /*Third line on new x when downscaled*/
-        else if(x_int[0] != x_int[2]) {
-            cir_x[cir_size] = x_int[0];
-            cir_y[cir_size] = y_8th_cnt;
-            c->cir_opa[cir_size] = x_fract[0] + x_fract[1];
-            c->cir_opa[cir_size] *= 16;
-            cir_size++;
-
-            cir_x[cir_size] = x_int[0] - 1;
-            cir_y[cir_size] = y_8th_cnt;
-            uint32_t tmp = 2 * 4 + x_fract[2] + x_fract[3];
-            c->cir_opa[cir_size] = tmp;
-            c->cir_opa[cir_size] *= 16;
-            cir_size++;
-        }
-        /*Forth line on new x when downscaled*/
-        else {
-            cir_x[cir_size] = x_int[0];
-            cir_y[cir_size] = y_8th_cnt;
-            c->cir_opa[cir_size] = x_fract[0] + x_fract[1] + x_fract[2];
-            c->cir_opa[cir_size] *= 16;
-            cir_size++;
-
-            uint32_t tmp = 3 * 4 + x_fract[3];
-            cir_x[cir_size] = x_int[0] - 1;
-            cir_y[cir_size] = y_8th_cnt;
-            c->cir_opa[cir_size] = tmp;
-
-            c->cir_opa[cir_size] *= 16;
-            cir_size++;
-        }
-
-        y_8th_cnt++;
-    }
-
-    int32_t mid = radius * 723;
-    int32_t mid_int = mid >> 10;
-    if(cir_x[cir_size-1] != mid_int || cir_y[cir_size-1] != mid_int) {
-        tmp = mid - (mid_int << 10);
-        if(tmp <= 512) {
-            tmp = tmp * tmp * 2;
-            tmp = tmp >> (10 + 6);
-        } else {
-            tmp = 1024 - tmp;
-            tmp = (int32_t)tmp * tmp * 2;
-            tmp = (int32_t)tmp >> (10 + 6);
-            tmp = 15 - tmp;
-        }
-
-        cir_x[cir_size] = mid_int;
-        cir_y[cir_size] = mid_int;
-        c->cir_opa[cir_size] = tmp;
-        c->cir_opa[cir_size] *= 16;
-        cir_size++;
-    }
-
-    /*Build the second octet*/
-    for(i = cir_size - 2; i >= 0; i--, cir_size++) {
-        cir_x[cir_size] = cir_y[i];
-        cir_y[cir_size] = cir_x[i];
-        c->cir_opa[cir_size] = c->cir_opa[i];
-    }
-
-    uint32_t y = 0;
-    c->opa_start_on_y[0] = 0;
-    i = 0;
-    while(i < cir_size) {
-        c->opa_start_on_y[y] = i;
-        c->x_start_on_y[y] = cir_x[i];
-        for(; cir_y[i] == y && i < cir_size; i++) {
-            c->x_start_on_y[y] = LV_MIN(c->x_start_on_y[y], cir_x[i]);
-        }
-        y++;
-    }
-
-    lv_mem_buf_release(cir_x);
-}
-
-static lv_opa_t * get_next_line(_lv_draw_mask_radius_circle_dsc_t * c, lv_coord_t y, lv_coord_t * len, lv_coord_t * x_start)
-{
-    *len = c->opa_start_on_y[y + 1] - c->opa_start_on_y[y];
-    *x_start = c->x_start_on_y[y];
-    return &c->cir_opa[c->opa_start_on_y[y]];
-}
-
-
-/**
  * Initialize a fade mask.
  * @param param param pointer to a `lv_draw_mask_param_t` to initialize
  * @param rect coordinates of the rectangle to affect (absolute coordinates)
@@ -597,10 +450,10 @@ void lv_draw_mask_radius_init(lv_draw_mask_radius_param_t * param, const lv_area
 
     /*Try to reuse a circle cache entry*/
     for(i = 0; i < LV_CIRCLE_CACHE_SIZE; i++) {
-        if(circle_cache[i].radius == radius) {
-            circle_cache[i].used_cnt++;
-            CIRCLE_CACHE_AGING(circle_cache[i].life, radius);
-            param->circle = &circle_cache[i];
+        if(_lv_circle_cache[i].radius == radius) {
+            _lv_circle_cache[i].used_cnt++;
+            CIRCLE_CACHE_AGING(_lv_circle_cache[i].life, radius);
+            param->circle = &_lv_circle_cache[i];
             return;
         }
     }
@@ -608,9 +461,9 @@ void lv_draw_mask_radius_init(lv_draw_mask_radius_param_t * param, const lv_area
     /*If not found find a free entry with lowest life*/
     _lv_draw_mask_radius_circle_dsc_t * entry = NULL;
     for(i = 0; i < LV_CIRCLE_CACHE_SIZE; i++) {
-        if(circle_cache[i].used_cnt == 0) {
-            if(!entry) entry = &circle_cache[i];
-            else if(circle_cache[i].life < entry->life) entry = &circle_cache[i];
+        if(_lv_circle_cache[i].used_cnt == 0) {
+            if(!entry) entry = &_lv_circle_cache[i];
+            else if(_lv_circle_cache[i].life < entry->life) entry = &_lv_circle_cache[i];
         }
     }
 
@@ -1321,6 +1174,173 @@ LV_ATTRIBUTE_FAST_MEM static lv_draw_mask_res_t lv_draw_mask_map(lv_opa_t * mask
 
     return LV_DRAW_MASK_RES_CHANGED;
 }
+
+
+/**
+ * Get the next point from the circle
+ * @param c same as in circ_init. The next point stored here.
+ * @param tmp same as in circ_init.
+ */
+void lv_circ_next(lv_point_t * c, lv_coord_t * tmp)
+{
+
+    if(*tmp <= 0) {
+        (*tmp) += 2 * c->y + 3; /*Change in decision criterion for y -> y+1*/
+    } else {
+        (*tmp) += 2 * (c->y - c->x) + 5; /*Change for y -> y+1, x -> x-1*/
+        c->x--;
+    }
+    c->y++;
+}
+
+static void cir_calc_aa4(_lv_draw_mask_radius_circle_dsc_t * c, lv_coord_t radius)
+{
+    if(radius == 0) return;
+    c->radius = radius;
+
+    /*Allocate buffers*/
+    if(c->buf) lv_mem_free(c->buf);
+
+    c->buf = lv_mem_alloc(radius * 6 + 6);  /*Use uint16_t for opa_start_on_y and x_start_on_y*/
+    c->cir_opa = c->buf;
+    c->opa_start_on_y = (uint16_t *) (c->buf + 2 * radius + 2);
+    c->x_start_on_y = (uint16_t *) (c->buf + 4 * radius + 4);
+
+    lv_coord_t * cir_x = lv_mem_buf_get((radius + 1) * 2 * 2 * sizeof(lv_coord_t));
+    lv_coord_t * cir_y = &cir_x[(radius + 1) * 2];
+
+    uint32_t y_8th_cnt = 0;
+    lv_point_t cp;
+    int32_t tmp;
+    lv_circ_init(&cp, &tmp, radius * 4);    /*Upscale by 4*/
+    int32_t i;
+
+    uint32_t x_int[4];
+    uint32_t x_fract[4];
+    lv_coord_t cir_size = 0;
+    x_int[0] = cp.x >> 2;
+    x_fract[0] = 0;
+
+    /*Calculate an 1/8 circle*/
+    while(lv_circ_cont(&cp)) {
+        /*Calculate 4 point of the circle */
+        for(i = 0; i < 4; i++) {
+            lv_circ_next(&cp, &tmp);
+            if(lv_circ_cont(&cp) == false) break;
+            x_int[i] = cp.x >> 2;
+            x_fract[i] = cp.x & 0x3;
+        }
+        if(i != 4) break;
+
+        /*All lines on the same x when downscaled*/
+        if(x_int[0] == x_int[3]) {
+            cir_x[cir_size] = x_int[0];
+            cir_y[cir_size] = y_8th_cnt;
+            c->cir_opa[cir_size] = x_fract[0] + x_fract[1] + x_fract[2] + x_fract[3];
+            c->cir_opa[cir_size] *= 16;
+            cir_size++;
+        }
+        /*Second line on new x when downscaled*/
+        else if(x_int[0] != x_int[1]) {
+            cir_x[cir_size] = x_int[0];
+            cir_y[cir_size] = y_8th_cnt;
+            c->cir_opa[cir_size] = x_fract[0];
+            c->cir_opa[cir_size] *= 16;
+            cir_size++;
+
+            cir_x[cir_size] = x_int[0] - 1;
+            cir_y[cir_size] = y_8th_cnt;
+            uint32_t tmp = 1 * 4 + x_fract[1] + x_fract[2] + x_fract[3];
+            c->cir_opa[cir_size] = tmp;
+            c->cir_opa[cir_size] *= 16;
+            cir_size++;
+        }
+        /*Third line on new x when downscaled*/
+        else if(x_int[0] != x_int[2]) {
+            cir_x[cir_size] = x_int[0];
+            cir_y[cir_size] = y_8th_cnt;
+            c->cir_opa[cir_size] = x_fract[0] + x_fract[1];
+            c->cir_opa[cir_size] *= 16;
+            cir_size++;
+
+            cir_x[cir_size] = x_int[0] - 1;
+            cir_y[cir_size] = y_8th_cnt;
+            uint32_t tmp = 2 * 4 + x_fract[2] + x_fract[3];
+            c->cir_opa[cir_size] = tmp;
+            c->cir_opa[cir_size] *= 16;
+            cir_size++;
+        }
+        /*Forth line on new x when downscaled*/
+        else {
+            cir_x[cir_size] = x_int[0];
+            cir_y[cir_size] = y_8th_cnt;
+            c->cir_opa[cir_size] = x_fract[0] + x_fract[1] + x_fract[2];
+            c->cir_opa[cir_size] *= 16;
+            cir_size++;
+
+            uint32_t tmp = 3 * 4 + x_fract[3];
+            cir_x[cir_size] = x_int[0] - 1;
+            cir_y[cir_size] = y_8th_cnt;
+            c->cir_opa[cir_size] = tmp;
+
+            c->cir_opa[cir_size] *= 16;
+            cir_size++;
+        }
+
+        y_8th_cnt++;
+    }
+
+    /*The point on the 1/8 circle is special, calculate it manually*/
+    int32_t mid = radius * 723;
+    int32_t mid_int = mid >> 10;
+    if(cir_x[cir_size-1] != mid_int || cir_y[cir_size-1] != mid_int) {
+        tmp = mid - (mid_int << 10);
+        if(tmp <= 512) {
+            tmp = tmp * tmp * 2;
+            tmp = tmp >> (10 + 6);
+        } else {
+            tmp = 1024 - tmp;
+            tmp = (int32_t)tmp * tmp * 2;
+            tmp = (int32_t)tmp >> (10 + 6);
+            tmp = 15 - tmp;
+        }
+
+        cir_x[cir_size] = mid_int;
+        cir_y[cir_size] = mid_int;
+        c->cir_opa[cir_size] = tmp;
+        c->cir_opa[cir_size] *= 16;
+        cir_size++;
+    }
+
+    /*Build the second octet by mirroring the first*/
+    for(i = cir_size - 2; i >= 0; i--, cir_size++) {
+        cir_x[cir_size] = cir_y[i];
+        cir_y[cir_size] = cir_x[i];
+        c->cir_opa[cir_size] = c->cir_opa[i];
+    }
+
+    uint32_t y = 0;
+    i = 0;
+    c->opa_start_on_y[0] = 0;
+    while(i < cir_size) {
+        c->opa_start_on_y[y] = i;
+        c->x_start_on_y[y] = cir_x[i];
+        for(; cir_y[i] == y && i < cir_size; i++) {
+            c->x_start_on_y[y] = LV_MIN(c->x_start_on_y[y], cir_x[i]);
+        }
+        y++;
+    }
+
+    lv_mem_buf_release(cir_x);
+}
+
+static lv_opa_t * get_next_line(_lv_draw_mask_radius_circle_dsc_t * c, lv_coord_t y, lv_coord_t * len, lv_coord_t * x_start)
+{
+    *len = c->opa_start_on_y[y + 1] - c->opa_start_on_y[y];
+    *x_start = c->x_start_on_y[y];
+    return &c->cir_opa[c->opa_start_on_y[y]];
+}
+
 
 LV_ATTRIBUTE_FAST_MEM static inline lv_opa_t mask_mix(lv_opa_t mask_act, lv_opa_t mask_new)
 {

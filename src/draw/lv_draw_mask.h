@@ -149,14 +149,15 @@ typedef struct {
 
 typedef struct  {
     uint8_t * buf;
-    lv_opa_t * cir_opa;
-    uint8_t * x_start_on_y;
-    uint8_t * opa_start_on_y;
-    int32_t life;
-    uint32_t used_cnt;
-    lv_coord_t radius;
+    lv_opa_t * cir_opa;         /*Opacity of values on the circumference of an 1/4 circle*/
+    uint16_t * x_start_on_y;        /*The x coordinate of the circle for each y value*/
+    uint16_t * opa_start_on_y;      /*The index of `cir_opa` for each y value*/
+    int32_t life;               /*How many times the entry way used*/
+    uint32_t used_cnt;          /*Like a semaphore to count the referencing masks*/
+    lv_coord_t radius;          /*The radius of the entry*/
 } _lv_draw_mask_radius_circle_dsc_t;
 
+typedef _lv_draw_mask_radius_circle_dsc_t _lv_draw_mask_radius_circle_dsc_arr_t[LV_CIRCLE_CACHE_SIZE];
 
 typedef struct {
     /*The first element must be the common descriptor*/
@@ -253,6 +254,12 @@ void * lv_draw_mask_remove_custom(void * custom_id);
  * @param p pointer to a mask parameter
  */
 void lv_draw_mask_free_param(void * p);
+
+/**
+ * Called by LVGL the rendering of a screen is ready to clean up
+ * the temporal (cache) data of the masks
+ */
+void _lv_draw_mask_cleanup(void);
 
 //! @cond Doxygen_Suppress
 

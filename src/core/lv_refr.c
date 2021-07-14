@@ -235,6 +235,7 @@ void _lv_disp_refr_timer(lv_timer_t * tmr)
 
     lv_mem_buf_free_all();
     _lv_font_clean_up_fmt_txt();
+    _lv_draw_mask_cleanup();
 
 #if LV_USE_PERF_MONITOR && LV_USE_LABEL
     static lv_obj_t * perf_label = NULL;
