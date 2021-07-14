@@ -327,7 +327,6 @@ LV_ATTRIBUTE_FAST_MEM static void fill_normal(const lv_area_t * disp_area, lv_co
                 if(lv_gpu_nxp_vglite_fill(disp_buf, disp_w, lv_area_get_height(disp_area), draw_area, color, opa) == LV_RES_OK) {
                     return;
                 }
-                /*Fall down to SW render in case of error*/
             }
 #elif LV_USE_GPU_STM32_DMA2D
             if(lv_area_get_size(draw_area) >= 240) {
@@ -414,6 +413,7 @@ LV_ATTRIBUTE_FAST_MEM static void fill_normal(const lv_area_t * disp_area, lv_co
                 for(; x <= x_end4; x += 4) {
                     uint32_t mask32 = *((uint32_t *)mask);
                     if(mask32 == 0xFFFFFFFF) {
+#if LV_COLOR_DEPTH == 16
                         if((lv_uintptr_t)disp_buf_first & 0x3) {
                             *(disp_buf_first + 0) = color;
                             uint32_t * d = (uint32_t * )(disp_buf_first + 1);
@@ -422,9 +422,14 @@ LV_ATTRIBUTE_FAST_MEM static void fill_normal(const lv_area_t * disp_area, lv_co
                         } else {
                             uint32_t * d = (uint32_t * )disp_buf_first;
                             *d = c32;
-                            d++;
-                            *d = c32;
+                            *(d + 1) = c32;
                         }
+#else
+                        disp_buf_first[0] = color;
+                        disp_buf_first[1] = color;
+                        disp_buf_first[2] = color;
+                        disp_buf_first[3] = color;
+#endif
                         disp_buf_first+= 4;
                         mask += 4;
                     }
@@ -436,7 +441,6 @@ LV_ATTRIBUTE_FAST_MEM static void fill_normal(const lv_area_t * disp_area, lv_co
                     } else {
                         mask += 4;
                         disp_buf_first += 4;
-
                     }
                 }
 
